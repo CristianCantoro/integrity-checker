@@ -26,6 +26,7 @@ use crate::error;
 pub struct Features {
     pub sha2: bool,
     pub blake2b: bool,
+    pub ignore_hidden: bool,
 }
 
 impl Default for Features {
@@ -33,6 +34,7 @@ impl Default for Features {
         Features {
             sha2: true,
             blake2b: false,
+            ignore_hidden: true,
         }
     }
 }
@@ -42,6 +44,7 @@ impl Features {
         Features {
             sha2: checksum.sha2.is_some(),
             blake2b: checksum.blake2b.is_some(),
+            ignore_hidden: true,
         }
     }
 }
@@ -53,6 +56,7 @@ pub struct DatabaseChecksum {
     sha2: Option<HashSum>,
     #[serde(skip_serializing_if = "Option::is_none")]
     blake2b: Option<HashSum>,
+    ignore_hidden: bool,
     size: u64,
 }
 
@@ -71,6 +75,7 @@ impl From<Metrics> for DatabaseChecksum {
         DatabaseChecksum {
             sha2: metrics.sha2,
             blake2b: metrics.blake2b,
+            ignore_hidden: metrics.ignore_hidden,
             size: metrics.size,
         }
     }
@@ -98,9 +103,10 @@ pub struct Metrics {
     sha2: Option<HashSum>,
     #[serde(skip_serializing_if = "Option::is_none")]
     blake2b: Option<HashSum>,
-    size: u64,      // File size
-    nul: bool,      // Does the file contain a NUL byte?
-    nonascii: bool, // Does the file contain non-ASCII bytes?
+    ignore_hidden: bool,    // Should we ignore hidden files?
+    size: u64,              // File size
+    nul: bool,              // Does the file contain a NUL byte?
+    nonascii: bool,         // Does the file contain non-ASCII bytes?
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,6 +148,7 @@ impl EngineNonascii {
 struct Engines {
     sha2: Option<sha2::Sha512Trunc256>,
     blake2b: Option<blake2::VarBlake2b>,
+    ignore_hidden: bool,
     size: EngineSize,
     nul: EngineNul,
     nonascii: EngineNonascii,
@@ -160,6 +167,11 @@ impl Engines {
             } else {
                 None
             },
+            ignore_hidden: if features.ignore_hidden {
+                true
+            } else {
+                false
+            },
             size: EngineSize::default(),
             nul: EngineNul::default(),
             nonascii: EngineNonascii::default(),
@@ -171,6 +183,7 @@ impl Engines {
     fn input(&mut self, input: &[u8]) {
         self.sha2.iter_mut().for_each(|e| e.input(input));
         self.blake2b.iter_mut().for_each(|e| e.input(input));
+        self.ignore_hidden;
         self.size.input(input);
         self.nul.input(input);
         self.nonascii.input(input);
@@ -180,6 +193,7 @@ impl Engines {
             sha2: self.sha2.map(|e| HashSum(Vec::from(e.fixed_result().as_slice()))),
             blake2b: self.blake2b.map(|e| HashSum(
                 e.vec_result())),
+            ignore_hidden: self.ignore_hidden,
             size: self.size.result(),
             nul: self.nul.result(),
             nonascii: self.nonascii.result(),
@@ -480,7 +494,7 @@ impl Database {
 
         let parallel = threads > 1;
         if parallel {
-            WalkBuilder::new(&root).threads(threads).build_parallel().run(|| {
+            WalkBuilder::new(&root).hidden(features.ignore_hidden).git_ignore(true).threads(threads).build_parallel().run(|| {
                 let total_bytes = total_bytes.clone();
                 let database = database.clone();
                 let root = root.as_ref().to_owned();
@@ -503,7 +517,7 @@ impl Database {
         } else {
             let ref mut total_bytes = *total_bytes.lock().unwrap();
             let ref mut database = *database.lock().unwrap();
-            for entry in WalkBuilder::new(&root).build() {
+            for entry in WalkBuilder::new(&root).hidden(features.ignore_hidden).git_ignore(true).build() {
                 let entry = entry?;
                 if entry.file_type().map_or(false, |t| t.is_file()) {
                     let metrics = compute_metrics(entry.path(), features)?;

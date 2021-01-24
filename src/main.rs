@@ -68,6 +68,9 @@ impl<'a, 'b> DefaultFlags for clap::App<'a, 'b> {
                  .help("Disable use of BLAKE2b algorithm")
                  .long("no-blake2")
                  .overrides_with("blake2"))
+            .arg(clap::Arg::with_name("add-hidden")
+                 .help("Add hidden files")
+                 .short("H").long("add-hidden"))
     }
 }
 
@@ -90,7 +93,13 @@ fn parse_features(matches: &clap::ArgMatches) -> Features {
         defaults.blake2b
     };
 
-    Features { sha2: sha2, blake2b: blake2b }
+    let ignore_hidden = if matches.is_present("add-hidden") {
+        false
+    } else {
+        defaults.ignore_hidden
+    };
+
+    Features { sha2: sha2, blake2b: blake2b, ignore_hidden: ignore_hidden }
 }
 
 fn parse_threads(matches: &clap::ArgMatches) -> usize {
